@@ -36,8 +36,8 @@ echo.
 
 :: ── Clean old build ───────────────────────────────────────────────────────────
 echo [3/4] Eski build temizleniyor...
-if exist "dist\LuckyHelper" rmdir /s /q "dist\LuckyHelper"
-if exist "build\LuckyHelper" rmdir /s /q "build\LuckyHelper"
+if exist "dist\LuckyHelperApp" rmdir /s /q "dist\LuckyHelperApp"
+if exist "build\LuckyHelperApp" rmdir /s /q "build\LuckyHelperApp"
 echo       Tamam.
 echo.
 
@@ -55,8 +55,8 @@ if errorlevel 1 (
 echo.
 echo  ============================================================
 echo    BUILD BASARILI!
-echo    Cikti klasoru: dist\LuckyHelper\
-echo    Calistirmak icin: dist\LuckyHelper\LuckyHelper.exe
+echo    Cikti klasoru: dist\LuckyHelperApp\
+echo    Calistirmak icin: dist\LuckyHelperApp\LuckyHelperApp.exe
 echo  ============================================================
 echo.
 echo  NOT: Veri dosyalari (trades, ayarlar) sunrada saklanir:
