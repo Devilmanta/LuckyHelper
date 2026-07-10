@@ -5,11 +5,42 @@ SQLite CRUD operations for trade journal
 
 import sqlite3
 import os
+import math
 from datetime import datetime, date
 from typing import Optional
 
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "luckyhelper.db")
+
+def _get_app_data_dir() -> str:
+    """
+    Returns the persistent data directory for LuckyHelper.
+    - Windows: %APPDATA%/LuckyHelper
+    - macOS:   ~/Library/Application Support/LuckyHelper
+    - Linux:   ~/.local/share/LuckyHelper
+    Always creates the directory if it doesn't exist.
+    """
+    import platform
+    system = platform.system()
+    if system == "Windows":
+        base = os.environ.get("APPDATA", os.path.expanduser("~"))
+    elif system == "Darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+
+    app_dir = os.path.join(base, "LuckyHelper")
+    os.makedirs(app_dir, exist_ok=True)
+    return app_dir
+
+
+APP_DATA_DIR = _get_app_data_dir()
+DB_PATH = os.path.join(APP_DATA_DIR, "luckyhelper.db")
+
+# Screenshots (trade images) stored alongside the DB
+SCREENSHOTS_DIR = os.path.join(APP_DATA_DIR, "screenshots")
+os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+
+
 
 
 def get_connection() -> sqlite3.Connection:
@@ -220,6 +251,182 @@ def get_overall_stats() -> dict:
     row["worst_trade"] = row["worst_trade"] or 0.0
     
     return row
+
+
+def get_advanced_stats() -> dict:
+    """
+    Return a comprehensive set of trading statistics for the stats dashboard.
+    Includes: Profit Factor, Expectancy, Sharpe Ratio, Max Drawdown,
+    avg win/loss, streaks, symbol performance, and monthly breakdown.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # ── All trades ordered by date ─────────────────────────────
+    cursor.execute("""
+        SELECT date, symbol, direction, pnl, entry_price, exit_price,
+               sl_price, tp_price, quantity, risk_pct, leverage
+        FROM trades
+        ORDER BY date ASC, created_at ASC
+    """)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    if not rows:
+        return {}
+
+    pnls = [r["pnl"] for r in rows]
+    wins  = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    breakevens = [p for p in pnls if p == 0]
+
+    total = len(pnls)
+    win_count  = len(wins)
+    loss_count = len(losses)
+    total_pnl  = sum(pnls)
+
+    # ── Win Rate ───────────────────────────────────────────────
+    win_rate = (win_count / total * 100) if total > 0 else 0.0
+
+    # ── Profit Factor ──────────────────────────────────────────
+    gross_profit = sum(wins)
+    gross_loss   = abs(sum(losses)) if losses else 0.0
+    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float('inf')
+
+    # ── Average Win / Loss ─────────────────────────────────────
+    avg_win  = (gross_profit / win_count)  if win_count  > 0 else 0.0
+    avg_loss = (gross_loss   / loss_count) if loss_count > 0 else 0.0
+
+    # ── Risk/Reward Ratio (average) ────────────────────────────
+    rr_ratio = (avg_win / avg_loss) if avg_loss > 0 else 0.0
+
+    # ── Expectancy per trade ───────────────────────────────────
+    # Expectancy = (Win Rate × Avg Win) − (Loss Rate × Avg Loss)
+    loss_rate = (loss_count / total) if total > 0 else 0.0
+    expectancy = (win_rate / 100 * avg_win) - (loss_rate * avg_loss)
+
+    # ── Largest Win / Loss ─────────────────────────────────────
+    best_trade  = max(pnls)
+    worst_trade = min(pnls)
+
+    # ── Max Drawdown ──────────────────────────────────────────
+    peak = 0.0
+    running = 0.0
+    max_drawdown = 0.0
+    for p in pnls:
+        running += p
+        if running > peak:
+            peak = running
+        dd = peak - running
+        if dd > max_drawdown:
+            max_drawdown = dd
+
+    # ── Sharpe Ratio (simplified daily, risk-free=0) ──────────
+    # Group PnL by day
+    from collections import defaultdict
+    daily_pnl: dict = defaultdict(float)
+    for r in rows:
+        daily_pnl[r["date"]] += r["pnl"]
+    daily_returns = list(daily_pnl.values())
+    if len(daily_returns) > 1:
+        mean_r  = sum(daily_returns) / len(daily_returns)
+        variance = sum((x - mean_r) ** 2 for x in daily_returns) / len(daily_returns)
+        std_r = math.sqrt(variance) if variance > 0 else 0.0
+        sharpe = (mean_r / std_r * math.sqrt(252)) if std_r > 0 else 0.0
+    else:
+        sharpe = 0.0
+
+    # ── Consecutive Win/Loss Streaks ──────────────────────────
+    max_win_streak  = 0
+    max_loss_streak = 0
+    cur_win = 0
+    cur_loss = 0
+    for p in pnls:
+        if p > 0:
+            cur_win += 1
+            cur_loss = 0
+        elif p < 0:
+            cur_loss += 1
+            cur_win = 0
+        else:
+            cur_win = 0
+            cur_loss = 0
+        max_win_streak  = max(max_win_streak,  cur_win)
+        max_loss_streak = max(max_loss_streak, cur_loss)
+
+    # ── Symbol Performance ────────────────────────────────────
+    sym_stats: dict = defaultdict(lambda: {"pnl": 0.0, "count": 0, "wins": 0})
+    for r in rows:
+        sym = r["symbol"] or "?"
+        sym_stats[sym]["pnl"]   += r["pnl"]
+        sym_stats[sym]["count"] += 1
+        if r["pnl"] > 0:
+            sym_stats[sym]["wins"] += 1
+    symbol_performance = [
+        {"symbol": s, **v, "win_rate": (v["wins"] / v["count"] * 100) if v["count"] > 0 else 0}
+        for s, v in sym_stats.items()
+    ]
+    symbol_performance.sort(key=lambda x: x["pnl"], reverse=True)
+
+    # ── Direction Stats ───────────────────────────────────────
+    long_trades  = [r for r in rows if r["direction"] == "LONG"]
+    short_trades = [r for r in rows if r["direction"] == "SHORT"]
+    long_pnl  = sum(r["pnl"] for r in long_trades)
+    short_pnl = sum(r["pnl"] for r in short_trades)
+    long_wins  = sum(1 for r in long_trades  if r["pnl"] > 0)
+    short_wins = sum(1 for r in short_trades if r["pnl"] > 0)
+
+    # ── Monthly PnL breakdown ─────────────────────────────────
+    monthly_pnl: dict = defaultdict(float)
+    for r in rows:
+        month_key = r["date"][:7]  # "YYYY-MM"
+        monthly_pnl[month_key] += r["pnl"]
+    monthly_breakdown = sorted(
+        [{"month": k, "pnl": v} for k, v in monthly_pnl.items()],
+        key=lambda x: x["month"]
+    )
+
+    # ── Avg trades per day ────────────────────────────────────
+    active_days = len(daily_pnl)
+    avg_trades_per_day = (total / active_days) if active_days > 0 else 0.0
+
+    # ── Recovery Factor ──────────────────────────────────────
+    recovery_factor = (total_pnl / max_drawdown) if max_drawdown > 0 else 0.0
+
+    return {
+        "total_trades":       total,
+        "win_count":          win_count,
+        "loss_count":         loss_count,
+        "breakeven_count":    len(breakevens),
+        "win_rate":           win_rate,
+        "total_pnl":          total_pnl,
+        "gross_profit":       gross_profit,
+        "gross_loss":         gross_loss,
+        "profit_factor":      profit_factor,
+        "avg_win":            avg_win,
+        "avg_loss":           avg_loss,
+        "rr_ratio":           rr_ratio,
+        "expectancy":         expectancy,
+        "best_trade":         best_trade,
+        "worst_trade":        worst_trade,
+        "max_drawdown":       max_drawdown,
+        "sharpe":             sharpe,
+        "max_win_streak":     max_win_streak,
+        "max_loss_streak":    max_loss_streak,
+        "active_days":        active_days,
+        "avg_trades_per_day": avg_trades_per_day,
+        "recovery_factor":    recovery_factor,
+        "symbol_performance": symbol_performance,
+        "monthly_breakdown":  monthly_breakdown,
+        "long_count":         len(long_trades),
+        "short_count":        len(short_trades),
+        "long_pnl":           long_pnl,
+        "short_pnl":          short_pnl,
+        "long_wins":          long_wins,
+        "short_wins":         short_wins,
+        "long_win_rate":      (long_wins  / len(long_trades)  * 100) if long_trades  else 0.0,
+        "short_win_rate":     (short_wins / len(short_trades) * 100) if short_trades else 0.0,
+    }
 
 
 def get_setting(key: str, default: str = "") -> str:

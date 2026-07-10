@@ -699,8 +699,7 @@ class TradeFormDialog(QDialog):
         # Restore image
         img_filename = d.get("img_path", "")
         if img_filename:
-            screenshots_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots")
-            full_path = os.path.join(screenshots_dir, img_filename)
+            full_path = os.path.join(db_manager.SCREENSHOTS_DIR, img_filename)
             if os.path.exists(full_path):
                 self._set_image(full_path)
             else:
@@ -826,8 +825,7 @@ class TradeFormDialog(QDialog):
         if self.img_path:
             if os.path.exists(self.img_path):
                 import shutil
-                screenshots_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots")
-                os.makedirs(screenshots_dir, exist_ok=True)
+                screenshots_dir = db_manager.SCREENSHOTS_DIR
                 
                 # Check if already in screenshots folder
                 if os.path.abspath(os.path.dirname(self.img_path)) == os.path.abspath(screenshots_dir):
@@ -894,8 +892,7 @@ class TradeFormDialog(QDialog):
         clipboard = QApplication.clipboard()
         image = clipboard.image()
         if not image.isNull():
-            screenshots_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots")
-            os.makedirs(screenshots_dir, exist_ok=True)
+            screenshots_dir = db_manager.SCREENSHOTS_DIR
             
             # Generate a temporary path inside screenshots folder
             temp_file = tempfile.NamedTemporaryFile(
@@ -1292,7 +1289,7 @@ class DayDetailDialog(QDialog):
             if old_img_name:
                 import shutil
                 from datetime import datetime
-                screenshots_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots")
+                screenshots_dir = db_manager.SCREENSHOTS_DIR
                 old_full_path = os.path.join(screenshots_dir, old_img_name)
                 if os.path.exists(old_full_path):
                     ext = os.path.splitext(old_img_name)[1] or ".png"

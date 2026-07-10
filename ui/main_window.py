@@ -14,6 +14,8 @@ from ui.calendar_view import CalendarView
 from ui.risk_calculator import RiskCalculator
 from ui.avg_cost_calculator import AvgCostCalculator
 from ui.winrate_calculator import WinrateCalculator
+from ui.statistics_view import StatisticsView
+from ui.settings_view import SettingsView
 
 
 class ComingSoonPage(QWidget):
@@ -85,7 +87,8 @@ class MainWindow(QMainWindow):
         self.calendar_page.trades_changed.connect(self.sidebar.refresh_balance)
         self.stack.addWidget(self.calendar_page)                       # index 0
 
-        self.stats_page    = ComingSoonPage("İstatistikler",     "📊")
+        self.stats_page    = StatisticsView()
+        self.calendar_page.trades_changed.connect(self.stats_page.refresh)
         self.stack.addWidget(self.stats_page)                          # index 1
 
         self.risk_page     = RiskCalculator()
@@ -97,7 +100,8 @@ class MainWindow(QMainWindow):
         self.winrate_page = WinrateCalculator()
         self.stack.addWidget(self.winrate_page)                        # index 4
 
-        self.settings_page = ComingSoonPage("Ayarlar",           "⚙️")
+        self.settings_page = SettingsView()
+        self.settings_page.settings_changed.connect(self.sidebar.refresh_balance)
         self.stack.addWidget(self.settings_page)                       # index 5
 
         self._page_index = {
