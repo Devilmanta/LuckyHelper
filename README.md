@@ -90,6 +90,11 @@ LuckyHelper/
 - Yedek almak için sadece `%APPDATA%\LuckyHelper\` klasörünü kopyalayın
 
 ---
+<img width="1424" height="891" alt="image" src="https://github.com/user-attachments/assets/9d62a556-a292-4c95-a378-b70616d9cd24" />
+<img width="1430" height="925" alt="image" src="https://github.com/user-attachments/assets/71f11620-478d-46b1-ac3d-4404bf6e2a01" />
+<img width="1413" height="672" alt="image" src="https://github.com/user-attachments/assets/a9bb27f6-7f9b-4f94-a26b-42d7fa435554" />
+<img width="1408" height="652" alt="image" src="https://github.com/user-attachments/assets/8fa44776-549d-4d3b-9fab-7c3f7b6b881d" />
+<img width="1403" height="927" alt="image" src="https://github.com/user-attachments/assets/14180881-68db-4d61-8e09-c0f7f2a12dcd" />
 
 ## Lisans
 
