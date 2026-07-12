@@ -14,6 +14,10 @@ PNG_PATH  = os.path.join(ASSETS_DIR, "icon.png")
 
 def generate_with_pyqt6():
     """Fallback: draw icon with PyQt6 if Pillow is unavailable."""
+    if os.path.exists(PNG_PATH):
+        print(f"[i] Custom icon.png already exists at {PNG_PATH}. Skipping PyQt6 drawing fallback.")
+        return PNG_PATH
+
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QPainter, QColor, QPixmap, QRadialGradient, QPainterPath, QBrush, QPen
     from PyQt6.QtCore import Qt, QRectF, QPointF
@@ -95,6 +99,22 @@ def generate_with_pyqt6():
 
 
 def main():
+    if os.path.exists(PNG_PATH):
+        try:
+            from PIL import Image
+            print(f"[i] Custom icon.png found at {PNG_PATH}. Generating icon.ico from it...")
+            img = Image.open(PNG_PATH).convert("RGBA")
+            icons = []
+            for s in [256, 128, 64, 48, 32, 16]:
+                resampling = Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS
+                icons.append(img.resize((s, s), resampling))
+            icons[0].save(ICO_PATH, format="ICO", sizes=[(s, s) for s in [256, 128, 64, 48, 32, 16]],
+                          append_images=icons[1:])
+            print(f"[OK] Icon ICO saved: {ICO_PATH}")
+            return
+        except Exception as e:
+            print(f"[!] Failed to generate ICO from custom PNG: {e}")
+
     try:
         from PIL import Image, ImageDraw, ImageFilter
         print("[i] Using Pillow to generate icon...")
@@ -147,7 +167,8 @@ def main():
         # Save as ICO with multiple sizes
         icons = []
         for s in [256, 128, 64, 48, 32, 16]:
-            icons.append(img.resize((s, s), Image.LANCZOS))
+            resampling = Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS
+            icons.append(img.resize((s, s), resampling))
         icons[0].save(ICO_PATH, format="ICO", sizes=[(s, s) for s in [256, 128, 64, 48, 32, 16]],
                       append_images=icons[1:])
         print(f"[OK] Icon ICO saved: {ICO_PATH}")
