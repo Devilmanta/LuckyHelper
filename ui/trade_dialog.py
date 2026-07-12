@@ -258,8 +258,7 @@ class TradeFormDialog(QDialog):
         outer.addLayout(row2(lbl("ENTRY FİYATI *"), self.entry_spin,
                              lbl("STOP LOSS *"),    self.sl_spin))
 
-        # ── RISK % SECTION ────────────────────────────────────
-        outer.addWidget(self._make_risk_section(LS))
+        # (Risk Management section removed)
 
         # ── POSITION SIZE (auto-filled, editable) ─────────────
         self.size_type_combo = QComboBox()
@@ -363,84 +362,9 @@ class TradeFormDialog(QDialog):
         outer.addWidget(img_box)
 
         # ── Connections ───────────────────────────────────────
-        self.entry_spin.valueChanged.connect(self._on_price_changed)
-        self.sl_spin.valueChanged.connect(self._on_price_changed)
-        self.exit_spin.valueChanged.connect(self._recalc_pnl)
-        self.qty_spin.valueChanged.connect(self._recalc_pnl)
-        self.usd_spin.valueChanged.connect(self._recalc_pnl)
-        self.margin_spin.valueChanged.connect(self._recalc_pnl)
-        self.dir_combo.currentTextChanged.connect(self._on_price_changed)
-        self.leverage_spin.valueChanged.connect(self._on_price_changed)
         self.size_type_combo.currentIndexChanged.connect(self._on_size_type_changed)
 
         return wrap
-
-    def _make_risk_section(self, lbl_style: str) -> QWidget:
-        """Risk % selector with preset buttons + custom input."""
-        box = QWidget()
-        box.setStyleSheet(
-            "background-color: #1C2128; border: 1px solid #21262D; border-radius: 8px;"
-        )
-        ly = QVBoxLayout(box)
-        ly.setContentsMargins(14, 10, 14, 10)
-        ly.setSpacing(8)
-
-        # Header row
-        hdr = QHBoxLayout()
-        risk_icon = QLabel("⚡ Risk Yönetimi")
-        risk_icon.setStyleSheet("color: #E6EDF3; font-size: 12px; font-weight: 700; background: transparent;")
-        hdr.addWidget(risk_icon)
-        hdr.addStretch()
-
-        if self._balance > 0:
-            bal_lbl = QLabel(f"Bakiye: ${self._balance:,.2f}")
-            bal_lbl.setStyleSheet("color: #8B949E; font-size: 11px; background: transparent;")
-            hdr.addWidget(bal_lbl)
-        ly.addLayout(hdr)
-
-        # Preset buttons + custom
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(6)
-
-        self._risk_btns: list[QPushButton] = []
-        for pct in self.RISK_PRESETS:
-            btn = QPushButton(f"%{pct:g}")
-            btn.setFixedHeight(30)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setAutoDefault(False)
-            btn.setDefault(False)
-            btn.setCheckable(True)
-            btn.setProperty("risk_pct", pct)
-            btn.clicked.connect(lambda checked, b=btn: self._on_risk_btn(b))
-            self._style_risk_btn(btn, active=False)
-            self._risk_btns.append(btn)
-            btn_row.addWidget(btn)
-
-        # Custom % input
-        custom_lbl = QLabel("Özel %")
-        custom_lbl.setStyleSheet("color: #8B949E; font-size: 11px; background: transparent;")
-        self.custom_risk_spin = QDoubleSpinBox()
-        self.custom_risk_spin.setRange(0.0, 100.0)
-        self.custom_risk_spin.setDecimals(2)
-        self.custom_risk_spin.setSingleStep(0.1)
-        self.custom_risk_spin.setFixedWidth(80)
-        self.custom_risk_spin.setFixedHeight(30)
-        self.custom_risk_spin.setStyleSheet(self._SPIN_SS)
-        self.custom_risk_spin.valueChanged.connect(self._on_custom_risk_changed)
-
-        btn_row.addStretch()
-        btn_row.addWidget(custom_lbl)
-        btn_row.addWidget(self.custom_risk_spin)
-        ly.addLayout(btn_row)
-
-        # Result line: risk amount + calculated size
-        self.risk_result_lbl = QLabel("")
-        self.risk_result_lbl.setStyleSheet(
-            "color: #8B949E; font-size: 11px; background: transparent;"
-        )
-        ly.addWidget(self.risk_result_lbl)
-
-        return box
 
     # ── PnL display area ──────────────────────────────────────
     def _make_pnl_area(self) -> QWidget:
@@ -448,35 +372,61 @@ class TradeFormDialog(QDialog):
         bar.setStyleSheet("background-color: #0D1117;")
         ly = QHBoxLayout(bar)
         ly.setContentsMargins(24, 4, 24, 12)
-        ly.setSpacing(16)
+        ly.setSpacing(24)
 
+        # Manual PNL input
         info_col = QVBoxLayout()
-        info_col.setSpacing(2)
-        pnl_cap = QLabel("HESAPLANAN PNL  (otomatik)")
-        pnl_cap.setStyleSheet("color: #484F58; font-size: 10px; font-weight: 600; background: transparent; letter-spacing: 1px;")
-        self.pnl_display = QLabel("$0.00")
-        self._set_pnl_display(0.0)
+        info_col.setSpacing(4)
+        pnl_cap = QLabel("PNL TUTARI ($) *")
+        pnl_cap.setStyleSheet("color: #8B949E; font-size: 11px; font-weight: 600; background: transparent;")
+        
+        self.pnl_spin = self._spin(prefix="$ ", dec=2, neg=True)
+        self.pnl_spin.setFixedWidth(140)
+        self.pnl_spin.valueChanged.connect(self._update_pnl_ratio)
+        
         info_col.addWidget(pnl_cap)
-        info_col.addWidget(self.pnl_display)
+        info_col.addWidget(self.pnl_spin)
 
-        hint = QLabel("💡 Exit fiyatı girilince PnL kendiliğinden hesaplanır.")
+        # Calculated PNL to Balance ratio
+        ratio_col = QVBoxLayout()
+        ratio_col.setSpacing(4)
+        ratio_cap = QLabel("BAKİYEYE ORANI")
+        ratio_cap.setStyleSheet("color: #8B949E; font-size: 11px; font-weight: 600; background: transparent;")
+        
+        self.pnl_ratio_display = QLabel("%0.00")
+        self._set_ratio_display(0.0)
+        
+        ratio_col.addWidget(ratio_cap)
+        ratio_col.addWidget(self.pnl_ratio_display)
+
+        hint = QLabel("💡 PnL girildiğinde bakiyeye oranı otomatik hesaplanır.")
         hint.setStyleSheet("color: #484F58; font-size: 10px; background: transparent;")
 
         ly.addLayout(info_col)
+        ly.addLayout(ratio_col)
         ly.addStretch()
         ly.addWidget(hint)
         return bar
 
-    def _set_pnl_display(self, pnl: float):
-        if pnl > 0:
+    def _update_pnl_ratio(self):
+        pnl = self.pnl_spin.value()
+        balance = self._balance
+        if balance > 0:
+            ratio = (pnl / balance) * 100
+        else:
+            ratio = 0.0
+        self._set_ratio_display(ratio)
+
+    def _set_ratio_display(self, ratio: float):
+        if ratio > 0:
             color, bg, border = "#00C853", "rgba(0,200,83,0.08)", "#00C853"
-        elif pnl < 0:
+        elif ratio < 0:
             color, bg, border = "#FF3D57", "rgba(255,61,87,0.08)", "#FF3D57"
         else:
             color, bg, border = "#8B949E", "#1C2128", "#30363D"
-        sign = "+" if pnl > 0 else ""
-        self.pnl_display.setText(f"${sign}{pnl:,.2f}")
-        self.pnl_display.setStyleSheet(
+        sign = "+" if ratio > 0 else ""
+        self.pnl_ratio_display.setText(f"%{sign}{ratio:,.2f}")
+        self.pnl_ratio_display.setStyleSheet(
             self._PNL_DISPLAY_SS.format(color=color, bg=bg, border=border)
         )
 
@@ -523,114 +473,15 @@ class TradeFormDialog(QDialog):
             s.setPrefix(prefix)
         return s
 
-    def _style_risk_btn(self, btn: QPushButton, active: bool):
-        if active:
-            btn.setStyleSheet(self._RISK_BTN_SS.format(
-                bg="rgba(0,212,255,0.18)", fg="#00D4FF", border="#00D4FF"
-            ))
-        else:
-            btn.setStyleSheet(self._RISK_BTN_SS.format(
-                bg="#21262D", fg="#8B949E", border="#30363D"
-            ))
 
-    def _current_risk_pct(self) -> float:
-        """Return the currently selected risk % (custom or preset)."""
-        custom = self.custom_risk_spin.value()
-        if custom > 0:
-            return custom
-        for btn in self._risk_btns:
-            if btn.isChecked():
-                return btn.property("risk_pct")
-        return 0.0
 
     # ═══════════════════════════════════════════════════════════
     #  SLOTS / LOGIC
     # ═══════════════════════════════════════════════════════════
-    def _on_risk_btn(self, clicked_btn: QPushButton):
-        for btn in self._risk_btns:
-            is_active = (btn is clicked_btn and btn.isChecked())
-            btn.setChecked(is_active)
-            self._style_risk_btn(btn, is_active)
-        # Clear custom spin when a preset is clicked
-        if clicked_btn.isChecked():
-            self.custom_risk_spin.blockSignals(True)
-            self.custom_risk_spin.setValue(0.0)
-            self.custom_risk_spin.blockSignals(False)
-        self._recalc_size_from_risk()
-
-    def _on_custom_risk_changed(self, value: float):
-        if value > 0:
-            # Deactivate presets
-            for btn in self._risk_btns:
-                btn.setChecked(False)
-                self._style_risk_btn(btn, False)
-        self._recalc_size_from_risk()
-
     def _on_size_type_changed(self, index: int):
         self.qty_spin.setVisible(index == 0)
         self.usd_spin.setVisible(index == 1)
         self.margin_spin.setVisible(index == 2)
-        self._recalc_size_from_risk()
-
-    def _on_price_changed(self):
-        """Called when entry/sl/direction/leverage changes → recalculate size if risk% set."""
-        self._recalc_size_from_risk()
-        self._recalc_pnl()
-
-    def _recalc_size_from_risk(self):
-        """Auto-fill position size based on risk% + entry + SL + leverage."""
-        if self._block_size_recalc:
-            return
-
-        risk_pct  = self._current_risk_pct()
-        entry     = self.entry_spin.value()
-        sl        = self.sl_spin.value()
-        leverage  = max(1, self.leverage_spin.value())
-        balance   = self._balance
-
-        if balance <= 0 or risk_pct <= 0 or entry <= 0 or sl <= 0:
-            self.risk_result_lbl.setText("")
-            self._recalc_pnl()
-            return
-
-        direction     = self.dir_combo.currentText()
-        risk_amount   = balance * risk_pct / 100.0
-        risk_per_unit = abs(entry - sl)
-
-        if risk_per_unit <= 0:
-            self.risk_result_lbl.setText("⚠ Entry ve SL aynı fiyat olamaz.")
-            return
-
-        # Direction check warning
-        if direction == "LONG" and sl >= entry:
-            self.risk_result_lbl.setText("⚠ LONG pozisyonda SL, Entry'den küçük olmalı.")
-            return
-        if direction == "SHORT" and sl <= entry:
-            self.risk_result_lbl.setText("⚠ SHORT pozisyonda SL, Entry'den büyük olmalı.")
-            return
-
-        nominal_qty = risk_amount / risk_per_unit
-        nominal_usd = nominal_qty * entry
-        margin_qty  = nominal_qty / leverage
-        margin_usd  = nominal_usd / leverage
-
-        # Fill the size fields
-        self._block_size_recalc = True
-        idx = self.size_type_combo.currentIndex()
-        if idx == 0:  # ADET (Margin units)
-            self.qty_spin.setValue(round(margin_qty, 6))
-        elif idx == 1:  # USD (Notional)
-            self.usd_spin.setValue(round(nominal_usd, 2))
-        else:  # MARGIN (Margin USD)
-            self.margin_spin.setValue(round(margin_usd, 2))
-        self._block_size_recalc = False
-
-        self.risk_result_lbl.setText(
-            f"✅ Risk: ${risk_amount:,.2f} | "
-            f"Büyüklük: ${nominal_usd:,.2f} | "
-            f"Marjin: ${margin_usd:,.2f}"
-        )
-        self._recalc_pnl()
 
     def _effective_qty(self) -> float:
         entry = self.entry_spin.value()
@@ -646,19 +497,6 @@ class TradeFormDialog(QDialog):
         else:  # Marjin USD
             return (self.margin_spin.value() * leverage) / entry
 
-    def _recalc_pnl(self):
-        """Recalculate and display PnL (read-only)."""
-        entry  = self.entry_spin.value()
-        exit_p = self.exit_spin.value()
-        qty    = self._effective_qty()
-
-        if entry > 0 and exit_p > 0 and qty > 0:
-            direction = self.dir_combo.currentText()
-            pnl = (exit_p - entry) * qty if direction == "LONG" else (entry - exit_p) * qty
-            self._set_pnl_display(round(pnl, 2))
-        else:
-            self._set_pnl_display(0.0)
-
     # ── Populate (edit mode) ──────────────────────────────────
     def _populate(self, d: dict):
         self._block_size_recalc = True
@@ -673,16 +511,6 @@ class TradeFormDialog(QDialog):
         self.sl_spin.setValue(d.get("sl_price",    0.0))
         self.tp_spin.setValue(d.get("tp_price",    0.0))
         self.exit_spin.setValue(d.get("exit_price", 0.0))
-
-        # Restore risk %
-        saved_risk = d.get("risk_pct", 0.0)
-        if saved_risk in self.RISK_PRESETS:
-            for btn in self._risk_btns:
-                is_me = abs(btn.property("risk_pct") - saved_risk) < 0.001
-                btn.setChecked(is_me)
-                self._style_risk_btn(btn, is_me)
-        elif saved_risk > 0:
-            self.custom_risk_spin.setValue(saved_risk)
 
         # Restore size
         size_type = d.get("size_type", "ADET")
@@ -708,8 +536,9 @@ class TradeFormDialog(QDialog):
             self._remove_image()
 
         self.notes_edit.setPlainText(d.get("notes", ""))
+        self.pnl_spin.setValue(d.get("pnl", 0.0))
+        self._update_pnl_ratio()
         self._block_size_recalc = False
-        self._recalc_pnl()
 
     # ── Image helpers ─────────────────────────────────────────
     def _select_image(self):
@@ -791,6 +620,9 @@ class TradeFormDialog(QDialog):
             self.entry_spin.setFocus()
             return
 
+        entry = self.entry_spin.value()
+        exit_p = self.exit_spin.value()
+
         # Determine size
         idx = self.size_type_combo.currentIndex()
         if idx == 0:
@@ -800,25 +632,15 @@ class TradeFormDialog(QDialog):
         elif idx == 1:
             size_type  = "USD"
             size_value = self.usd_spin.value()
-            entry      = self.entry_spin.value()
             quantity   = (size_value / entry) if entry > 0 else 0.0
         else:
             size_type  = "MARGIN"
             size_value = self.margin_spin.value()
-            entry      = self.entry_spin.value()
             leverage   = max(1, self.leverage_spin.value())
             quantity   = (size_value * leverage / entry) if entry > 0 else 0.0
 
-        # PnL — always calculated, never manually entered
-        entry  = self.entry_spin.value()
-        exit_p = self.exit_spin.value()
-        qty    = self._effective_qty()
-        if entry > 0 and exit_p > 0 and qty > 0:
-            direction = self.dir_combo.currentText()
-            pnl = (exit_p - entry) * qty if direction == "LONG" else (entry - exit_p) * qty
-            pnl = round(pnl, 2)
-        else:
-            pnl = 0.0
+        # PnL — entered manually
+        pnl = round(self.pnl_spin.value(), 2)
 
         # Copy image if selected
         copied_path = ""
@@ -864,7 +686,7 @@ class TradeFormDialog(QDialog):
             "notes":       self.notes_edit.toPlainText().strip(),
             "size_type":   size_type,
             "size_value":  size_value,
-            "risk_pct":    self._current_risk_pct(),
+            "risk_pct":    0.0,
             "leverage":    self.leverage_spin.value(),
             "img_path":    copied_path,
         }
