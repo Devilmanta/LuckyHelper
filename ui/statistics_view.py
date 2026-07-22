@@ -519,21 +519,34 @@ class StatisticsView(QWidget):
 
         # ── Section 1: Top KPI row ────────────────────────────────
         cl.addWidget(_section_title("GENEL BAKIŞ"))
-        cl.addLayout(self._build_overview_row(s))
+        cl.addWidget(self._wrap_row(self._build_overview_row(s)))
 
         # ── Section 2: Performance metrics ───────────────────────
         cl.addWidget(_section_title("PERFORMANS METRİKLERİ"))
-        cl.addLayout(self._build_performance_row(s))
+        cl.addWidget(self._wrap_row(self._build_performance_row(s)))
 
         # ── Section 3: Monthly chart + Direction + Streak ─────────
         cl.addWidget(_section_title("ANALİZ"))
-        cl.addLayout(self._build_analysis_row(s))
+        cl.addWidget(self._build_analysis_row(s))
 
         # ── Section 4: Symbol leaderboard ────────────────────────
         cl.addWidget(_section_title("SEMBOL PERFORMANSI"))
         cl.addWidget(self._build_symbol_table(s))
 
         cl.addStretch()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    #  HELPERS
+    # ──────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _wrap_row(layout: QHBoxLayout) -> QWidget:
+        """Wrap a QHBoxLayout in a QWidget so it can be added to a QVBoxLayout."""
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        container.setLayout(layout)
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return container
 
     # ──────────────────────────────────────────────────────────────────────────
     #  SECTION BUILDERS
@@ -566,6 +579,10 @@ class StatisticsView(QWidget):
                     f"${s['expectancy']:+,.2f}",
                     "İşlem başına beklenen kâr",
                     "#00C853" if s["expectancy"] >= 0 else "#FF3D57"),
+            KpiCard("💸", "Toplam Fee",
+                    f"-${s.get('total_fee', 0.0):,.2f}",
+                    "Ödenen toplam komisyon",
+                    "#FF7043"),
         ]
 
         for c in cards:
@@ -617,15 +634,20 @@ class StatisticsView(QWidget):
 
         return row
 
-    def _build_analysis_row(self, s: dict) -> QHBoxLayout:
-        row = QHBoxLayout()
+    def _build_analysis_row(self, s: dict) -> QWidget:
+        """Build the analysis section as a proper widget container."""
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        row = QHBoxLayout(container)
         row.setSpacing(12)
+        row.setContentsMargins(0, 0, 0, 0)
 
         # Monthly chart card
         monthly_card = QWidget()
         monthly_card.setObjectName("StatsCard")
         monthly_card.setStyleSheet(self._CARD_STYLE)
-        monthly_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        monthly_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         m_lay = QVBoxLayout(monthly_card)
         m_lay.setContentsMargins(16, 14, 16, 14)
         m_lay.setSpacing(8)
@@ -672,9 +694,13 @@ class StatisticsView(QWidget):
 
         row.addWidget(monthly_card, 2)
 
-        # Right column: Direction + Streak
-        right_col = QVBoxLayout()
+        # Right column: Direction + Streak + Extra (stacked vertically, no stretch between)
+        right_col_widget = QWidget()
+        right_col_widget.setStyleSheet("background: transparent;")
+        right_col_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        right_col = QVBoxLayout(right_col_widget)
         right_col.setSpacing(12)
+        right_col.setContentsMargins(0, 0, 0, 0)
 
         dir_card = DirectionSplitCard(s)
         dir_card.setStyleSheet(self._CARD_STYLE)
@@ -686,16 +712,16 @@ class StatisticsView(QWidget):
         streak_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         right_col.addWidget(streak_card)
 
-        right_col.addStretch()
-
-        # Extra stats card
+        # Extra stats card (no stretch before it — keeps cards stacked tightly)
         extra = self._build_extra_card(s)
         extra.setStyleSheet(self._CARD_STYLE)
         extra.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         right_col.addWidget(extra)
 
-        row.addLayout(right_col, 1)
-        return row
+        right_col.addStretch()  # push all cards to top
+
+        row.addWidget(right_col_widget, 1)
+        return container
 
     def _build_extra_card(self, s: dict) -> QWidget:
         """Miscellaneous stats card."""

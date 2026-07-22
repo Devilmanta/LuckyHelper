@@ -67,6 +67,7 @@ def initialize_db():
             tp_price    REAL DEFAULT 0.0,
             sl_price    REAL DEFAULT 0.0,
             pnl         REAL DEFAULT 0.0,
+            fee         REAL DEFAULT 0.0,
             notes       TEXT DEFAULT '',
             size_type   TEXT DEFAULT 'ADET',
             size_value  REAL DEFAULT 0.0,
@@ -84,6 +85,7 @@ def initialize_db():
         "ALTER TABLE trades ADD COLUMN risk_pct REAL DEFAULT 0.0",
         "ALTER TABLE trades ADD COLUMN leverage INTEGER DEFAULT 1",
         "ALTER TABLE trades ADD COLUMN img_path TEXT DEFAULT ''",
+        "ALTER TABLE trades ADD COLUMN fee REAL DEFAULT 0.0",
     ]:
         try:
             cursor.execute(migration)
@@ -121,13 +123,14 @@ def get_trades_for_date(trade_date: str) -> list[dict]:
 def get_monthly_summary(year: int, month: int) -> dict[str, dict]:
     """
     Return {date_str: {"total_pnl": float, "trade_count": int}} for every day in the given month that has trades.
+    Net PnL shown on calendar = pnl - fee.
     """
     month_str = f"{year}-{month:02d}"
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT date, SUM(pnl) as total_pnl, COUNT(*) as trade_count
+        SELECT date, SUM(pnl - fee) as total_pnl, COUNT(*) as trade_count
         FROM trades
         WHERE date LIKE ?
         GROUP BY date
@@ -161,6 +164,7 @@ def add_trade(
     risk_pct: float = 0.0,
     leverage: int = 1,
     img_path: str = "",
+    fee: float = 0.0,
 ) -> int:
     """Insert a new trade."""
     conn = get_connection()
@@ -169,11 +173,11 @@ def add_trade(
         """
         INSERT INTO trades
             (date, symbol, direction, entry_price, exit_price, quantity,
-             tp_price, sl_price, pnl, notes, size_type, size_value, risk_pct, leverage, img_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             tp_price, sl_price, pnl, fee, notes, size_type, size_value, risk_pct, leverage, img_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (trade_date, symbol, direction, entry_price, exit_price, quantity,
-         tp_price, sl_price, pnl, notes, size_type, size_value, risk_pct, leverage, img_path)
+         tp_price, sl_price, pnl, fee, notes, size_type, size_value, risk_pct, leverage, img_path)
     )
     conn.commit()
     new_id = cursor.lastrowid
@@ -197,6 +201,7 @@ def update_trade(
     risk_pct: float = 0.0,
     leverage: int = 1,
     img_path: str = "",
+    fee: float = 0.0,
 ):
     """Update an existing trade by id."""
     conn = get_connection()
@@ -205,12 +210,12 @@ def update_trade(
         """
         UPDATE trades
         SET symbol=?, direction=?, entry_price=?, exit_price=?,
-            quantity=?, tp_price=?, sl_price=?, pnl=?, notes=?,
+            quantity=?, tp_price=?, sl_price=?, pnl=?, fee=?, notes=?,
             size_type=?, size_value=?, risk_pct=?, leverage=?, img_path=?
         WHERE id=?
         """,
         (symbol, direction, entry_price, exit_price, quantity,
-         tp_price, sl_price, pnl, notes, size_type, size_value, risk_pct, leverage, img_path, trade_id)
+         tp_price, sl_price, pnl, fee, notes, size_type, size_value, risk_pct, leverage, img_path, trade_id)
     )
     conn.commit()
     conn.close()
@@ -232,11 +237,11 @@ def get_overall_stats() -> dict:
     cursor.execute("""
         SELECT
             COUNT(*) as total_trades,
-            SUM(pnl) as total_pnl,
-            SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as winning_trades,
-            SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losing_trades,
-            MAX(pnl) as best_trade,
-            MIN(pnl) as worst_trade
+            SUM(pnl - fee) as total_pnl,
+            SUM(CASE WHEN (pnl - fee) > 0 THEN 1 ELSE 0 END) as winning_trades,
+            SUM(CASE WHEN (pnl - fee) < 0 THEN 1 ELSE 0 END) as losing_trades,
+            MAX(pnl - fee) as best_trade,
+            MIN(pnl - fee) as worst_trade
         FROM trades
     """)
     row = dict(cursor.fetchone())
@@ -264,7 +269,7 @@ def get_advanced_stats() -> dict:
 
     # ── All trades ordered by date ─────────────────────────────
     cursor.execute("""
-        SELECT date, symbol, direction, pnl, entry_price, exit_price,
+        SELECT date, symbol, direction, pnl, fee, entry_price, exit_price,
                sl_price, tp_price, quantity, risk_pct, leverage
         FROM trades
         ORDER BY date ASC, created_at ASC
@@ -275,7 +280,9 @@ def get_advanced_stats() -> dict:
     if not rows:
         return {}
 
-    pnls = [r["pnl"] for r in rows]
+    # Net PnL = gross pnl - fee
+    pnls = [r["pnl"] - r.get("fee", 0.0) for r in rows]
+    total_fee = sum(r.get("fee", 0.0) for r in rows)
     wins  = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
     breakevens = [p for p in pnls if p == 0]
@@ -358,9 +365,10 @@ def get_advanced_stats() -> dict:
     sym_stats: dict = defaultdict(lambda: {"pnl": 0.0, "count": 0, "wins": 0})
     for r in rows:
         sym = r["symbol"] or "?"
-        sym_stats[sym]["pnl"]   += r["pnl"]
+        net = r["pnl"] - r.get("fee", 0.0)
+        sym_stats[sym]["pnl"]   += net
         sym_stats[sym]["count"] += 1
-        if r["pnl"] > 0:
+        if net > 0:
             sym_stats[sym]["wins"] += 1
     symbol_performance = [
         {"symbol": s, **v, "win_rate": (v["wins"] / v["count"] * 100) if v["count"] > 0 else 0}
@@ -371,16 +379,19 @@ def get_advanced_stats() -> dict:
     # ── Direction Stats ───────────────────────────────────────
     long_trades  = [r for r in rows if r["direction"] == "LONG"]
     short_trades = [r for r in rows if r["direction"] == "SHORT"]
-    long_pnl  = sum(r["pnl"] for r in long_trades)
-    short_pnl = sum(r["pnl"] for r in short_trades)
-    long_wins  = sum(1 for r in long_trades  if r["pnl"] > 0)
-    short_wins = sum(1 for r in short_trades if r["pnl"] > 0)
+    long_pnl  = sum(r["pnl"] - r.get("fee", 0.0) for r in long_trades)
+    short_pnl = sum(r["pnl"] - r.get("fee", 0.0) for r in short_trades)
+    long_wins  = sum(1 for r in long_trades  if (r["pnl"] - r.get("fee", 0.0)) > 0)
+    short_wins = sum(1 for r in short_trades if (r["pnl"] - r.get("fee", 0.0)) > 0)
 
     # ── Monthly PnL breakdown ─────────────────────────────────
     monthly_pnl: dict = defaultdict(float)
+    monthly_fee: dict = defaultdict(float)
     for r in rows:
         month_key = r["date"][:7]  # "YYYY-MM"
-        monthly_pnl[month_key] += r["pnl"]
+        net = r["pnl"] - r.get("fee", 0.0)
+        monthly_pnl[month_key] += net
+        monthly_fee[month_key] += r.get("fee", 0.0)
     monthly_breakdown = sorted(
         [{"month": k, "pnl": v} for k, v in monthly_pnl.items()],
         key=lambda x: x["month"]
@@ -400,6 +411,7 @@ def get_advanced_stats() -> dict:
         "breakeven_count":    len(breakevens),
         "win_rate":           win_rate,
         "total_pnl":          total_pnl,
+        "total_fee":          total_fee,
         "gross_profit":       gross_profit,
         "gross_loss":         gross_loss,
         "profit_factor":      profit_factor,

@@ -366,53 +366,98 @@ class TradeFormDialog(QDialog):
 
         return wrap
 
-    # ── PnL display area ──────────────────────────────────────
+    # ── PnL display area ────────────────────────────────────
     def _make_pnl_area(self) -> QWidget:
         bar = QWidget()
         bar.setStyleSheet("background-color: #0D1117;")
         ly = QHBoxLayout(bar)
         ly.setContentsMargins(24, 4, 24, 12)
-        ly.setSpacing(24)
+        ly.setSpacing(20)
 
-        # Manual PNL input
+        LS = "color: #8B949E; font-size: 11px; font-weight: 600; background: transparent;"
+
+        # ── PNL TUTARI ────────────────────────────────────────
         info_col = QVBoxLayout()
         info_col.setSpacing(4)
         pnl_cap = QLabel("PNL TUTARI ($) *")
-        pnl_cap.setStyleSheet("color: #8B949E; font-size: 11px; font-weight: 600; background: transparent;")
-        
+        pnl_cap.setStyleSheet(LS)
+
         self.pnl_spin = self._spin(prefix="$ ", dec=2, neg=True)
         self.pnl_spin.setFixedWidth(140)
         self.pnl_spin.valueChanged.connect(self._update_pnl_ratio)
-        
+
         info_col.addWidget(pnl_cap)
         info_col.addWidget(self.pnl_spin)
 
-        # Calculated PNL to Balance ratio
+        # ── KOMİSYON / FEE ───────────────────────────────────
+        fee_col = QVBoxLayout()
+        fee_col.setSpacing(4)
+        fee_cap = QLabel("KOMİSYON / FEE ($)")
+        fee_cap.setStyleSheet(LS)
+
+        self.fee_spin = self._spin(prefix="$ ", dec=4, neg=False, max_v=999_999)
+        self.fee_spin.setFixedWidth(140)
+        self.fee_spin.setToolTip("İşlem komisyonu. Net PnL = PnL − Fee olarak hesaplanır.")
+        self.fee_spin.valueChanged.connect(self._update_pnl_ratio)
+
+        fee_col.addWidget(fee_cap)
+        fee_col.addWidget(self.fee_spin)
+
+        # ── NET PNL (read-only) ────────────────────────────
+        net_col = QVBoxLayout()
+        net_col.setSpacing(4)
+        net_cap = QLabel("NET PNL ($)")
+        net_cap.setStyleSheet(LS)
+
+        self.net_pnl_display = QLabel("$0.00")
+        self.net_pnl_display.setStyleSheet(
+            "font-size: 14px; font-weight: 800; color: #8B949E;"
+            "background-color: #1C2128; border: 1px solid #30363D;"
+            "border-radius: 6px; padding: 7px 12px;"
+        )
+        net_col.addWidget(net_cap)
+        net_col.addWidget(self.net_pnl_display)
+
+        # ── BAKİYEYE ORANI ────────────────────────────────
         ratio_col = QVBoxLayout()
         ratio_col.setSpacing(4)
         ratio_cap = QLabel("BAKİYEYE ORANI")
-        ratio_cap.setStyleSheet("color: #8B949E; font-size: 11px; font-weight: 600; background: transparent;")
-        
+        ratio_cap.setStyleSheet(LS)
+
         self.pnl_ratio_display = QLabel("%0.00")
         self._set_ratio_display(0.0)
-        
+
         ratio_col.addWidget(ratio_cap)
         ratio_col.addWidget(self.pnl_ratio_display)
 
-        hint = QLabel("💡 PnL girildiğinde bakiyeye oranı otomatik hesaplanır.")
-        hint.setStyleSheet("color: #484F58; font-size: 10px; background: transparent;")
-
         ly.addLayout(info_col)
+        ly.addLayout(fee_col)
+        ly.addLayout(net_col)
         ly.addLayout(ratio_col)
         ly.addStretch()
-        ly.addWidget(hint)
         return bar
 
     def _update_pnl_ratio(self):
-        pnl = self.pnl_spin.value()
+        gross = self.pnl_spin.value()
+        fee = self.fee_spin.value()
+        net = gross - fee
+        # Update net PnL display
+        sign = "+" if net > 0 else ""
+        if net > 0:
+            net_color = "#00C853"
+        elif net < 0:
+            net_color = "#FF3D57"
+        else:
+            net_color = "#8B949E"
+        self.net_pnl_display.setText(f"{sign}${net:,.2f}")
+        self.net_pnl_display.setStyleSheet(
+            f"font-size: 14px; font-weight: 800; color: {net_color};"
+            "background-color: #1C2128; border: 1px solid #30363D;"
+            "border-radius: 6px; padding: 7px 12px;"
+        )
         balance = self._balance
         if balance > 0:
-            ratio = (pnl / balance) * 100
+            ratio = (net / balance) * 100
         else:
             ratio = 0.0
         self._set_ratio_display(ratio)
@@ -537,6 +582,7 @@ class TradeFormDialog(QDialog):
 
         self.notes_edit.setPlainText(d.get("notes", ""))
         self.pnl_spin.setValue(d.get("pnl", 0.0))
+        self.fee_spin.setValue(d.get("fee", 0.0))
         self._update_pnl_ratio()
         self._block_size_recalc = False
 
@@ -639,8 +685,9 @@ class TradeFormDialog(QDialog):
             leverage   = max(1, self.leverage_spin.value())
             quantity   = (size_value * leverage / entry) if entry > 0 else 0.0
 
-        # PnL — entered manually
+        # PnL — entered manually; fee deducted to get net
         pnl = round(self.pnl_spin.value(), 2)
+        fee = round(self.fee_spin.value(), 4)
 
         # Copy image if selected
         copied_path = ""
@@ -683,6 +730,7 @@ class TradeFormDialog(QDialog):
             "tp_price":    self.tp_spin.value(),
             "sl_price":    self.sl_spin.value(),
             "pnl":         pnl,
+            "fee":         fee,
             "notes":       self.notes_edit.toPlainText().strip(),
             "size_type":   size_type,
             "size_value":  size_value,
@@ -985,7 +1033,7 @@ class DayDetailDialog(QDialog):
             self.table.setItem(row, COL_TP,    cell(f"${trade['tp_price']:,.4f}", center))
             self.table.setItem(row, COL_SL,    cell(f"${trade['sl_price']:,.4f}", center))
 
-            pnl = trade["pnl"]
+            pnl = trade["pnl"] - trade.get("fee", 0.0)
             total_pnl += pnl
             pnl_item = cell(f"${pnl:+,.2f}", center)
             if pnl > 0:
@@ -995,6 +1043,7 @@ class DayDetailDialog(QDialog):
                 pnl_item.setForeground(QBrush(QColor("#FF3D57")))
                 losses += 1
             self.table.setItem(row, COL_PNL, pnl_item)
+
             
             # Grafik (Screenshot) column
             has_img = bool(trade.get("img_path", ""))
@@ -1038,6 +1087,7 @@ class DayDetailDialog(QDialog):
                 risk_pct=d.get("risk_pct", 0.0),
                 leverage=d.get("leverage", 1),
                 img_path=d.get("img_path", ""),
+                fee=d.get("fee", 0.0),
             )
             self._refresh_table()
             self.trades_changed.emit()
@@ -1074,6 +1124,7 @@ class DayDetailDialog(QDialog):
                 risk_pct=d.get("risk_pct", 0.0),
                 leverage=d.get("leverage", 1),
                 img_path=d.get("img_path", ""),
+                fee=d.get("fee", 0.0),
             )
             self._refresh_table()
             self.trades_changed.emit()
@@ -1140,6 +1191,7 @@ class DayDetailDialog(QDialog):
                 risk_pct=trade_data.get("risk_pct", 0.0),
                 leverage=trade_data.get("leverage", 1),
                 img_path=new_img_path,
+                fee=trade_data.get("fee", 0.0),
             )
             self._refresh_table()
             self.trades_changed.emit()
